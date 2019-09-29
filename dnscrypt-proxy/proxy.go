@@ -43,17 +43,17 @@ type Proxy struct {
 	queryLogIgnoredQtypes        []string
 	nxLogFile                    string
 	nxLogFormat                  string
-	blockNameFile                string
-	whitelistNameFile            string
+	blockNameRules               []MaskedQueryPlugin
+	whitelistRules               []MaskedQueryPlugin
 	blockNameLogFile             string
 	whitelistNameLogFile         string
 	blockNameFormat              string
 	whitelistNameFormat          string
-	blockIPFile                  string
+	blockIPRules                 []MaskedQueryPlugin
 	blockIPLogFile               string
 	blockIPFormat                string
-	forwardFile                  string
-	cloakFile                    string
+	forwardRules                 []MaskedQueryPlugin
+	cloakingRules                []MaskedQueryPlugin
 	pluginsGlobals               PluginsGlobals
 	urlsToPrefetch               []URLToPrefetch
 	clientsCount                 uint32

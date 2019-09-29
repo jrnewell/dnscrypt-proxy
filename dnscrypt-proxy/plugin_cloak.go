@@ -1,6 +1,7 @@
 package main
 
 import (
+	"gopkg.in/natefinch/lumberjack.v2"
 	"math/rand"
 	"net"
 	"strings"
@@ -27,6 +28,10 @@ type PluginCloak struct {
 	ttl            uint32
 }
 
+func NewPluginCloak() FileNamePlugin {
+	return FileNamePlugin(new(PluginCloak))
+}
+
 func (plugin *PluginCloak) Name() string {
 	return "cloak"
 }
@@ -36,8 +41,12 @@ func (plugin *PluginCloak) Description() string {
 }
 
 func (plugin *PluginCloak) Init(proxy *Proxy) error {
-	dlog.Noticef("Loading the set of cloaking rules from [%s]", proxy.cloakFile)
-	bin, err := ReadTextFile(proxy.cloakFile)
+	return nil
+}
+
+func (plugin *PluginCloak) InitWithFileName(proxy *Proxy, fileName string, logger *lumberjack.Logger) error {
+	dlog.Noticef("Loading the set of cloaking rules from [%s]", fileName)
+	bin, err := ReadTextFile(fileName)
 	if err != nil {
 		return err
 	}
@@ -86,6 +95,10 @@ func (plugin *PluginCloak) Init(proxy *Proxy) error {
 	for line, cloakedName := range cloakedNames {
 		plugin.patternMatcher.Add(line, cloakedName, cloakedName.lineNo)
 	}
+	return nil
+}
+
+func (plugin *PluginCloak) GetLogger() *lumberjack.Logger {
 	return nil
 }
 

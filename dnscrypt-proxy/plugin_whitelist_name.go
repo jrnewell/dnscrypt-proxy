@@ -20,6 +20,10 @@ type PluginWhitelistName struct {
 	format          string
 }
 
+func NewPluginWhitelistName() FileNamePlugin {
+	return FileNamePlugin(new(PluginWhitelistName))
+}
+
 func (plugin *PluginWhitelistName) Name() string {
 	return "whitelist_name"
 }
@@ -29,8 +33,12 @@ func (plugin *PluginWhitelistName) Description() string {
 }
 
 func (plugin *PluginWhitelistName) Init(proxy *Proxy) error {
-	dlog.Noticef("Loading the set of whitelisting rules from [%s]", proxy.whitelistNameFile)
-	bin, err := ReadTextFile(proxy.whitelistNameFile)
+	return nil
+}
+
+func (plugin *PluginWhitelistName) InitWithFileName(proxy *Proxy, fileName string, logger *lumberjack.Logger) error {
+	dlog.Noticef("Loading the set of whitelisting rules from [%s]", fileName)
+	bin, err := ReadTextFile(fileName)
 	if err != nil {
 		return err
 	}
@@ -67,10 +75,18 @@ func (plugin *PluginWhitelistName) Init(proxy *Proxy) error {
 	if len(proxy.whitelistNameLogFile) == 0 {
 		return nil
 	}
-	plugin.logger = &lumberjack.Logger{LocalTime: true, MaxSize: proxy.logMaxSize, MaxAge: proxy.logMaxAge, MaxBackups: proxy.logMaxBackups, Filename: proxy.whitelistNameLogFile, Compress: true}
+	if logger != nil {
+		plugin.logger = logger
+	} else {
+		plugin.logger = &lumberjack.Logger{LocalTime: true, MaxSize: proxy.logMaxSize, MaxAge: proxy.logMaxAge, MaxBackups: proxy.logMaxBackups, Filename: proxy.whitelistNameLogFile, Compress: true}
+	}
 	plugin.format = proxy.whitelistNameFormat
 
 	return nil
+}
+
+func (plugin *PluginWhitelistName) GetLogger() *lumberjack.Logger {
+	return plugin.logger
 }
 
 func (plugin *PluginWhitelistName) Drop() error {

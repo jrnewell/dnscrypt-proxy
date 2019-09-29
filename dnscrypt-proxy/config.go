@@ -57,7 +57,9 @@ type Config struct {
 	WhitelistName            WhitelistNameConfig        `toml:"whitelist"`
 	BlockIP                  BlockIPConfig              `toml:"ip_blacklist"`
 	ForwardFile              string                     `toml:"forwarding_rules"`
+	Forwarding               ForwardingConfig           `toml:"forwarding"`
 	CloakFile                string                     `toml:"cloaking_rules"`
+	Cloaking                 CloakingConfig             `toml:"cloaking"`
 	ServersConfig            map[string]StaticConfig    `toml:"static"`
 	SourcesConfig            map[string]SourceConfig    `toml:"sources"`
 	SourceRequireDNSSEC      bool                       `toml:"require_dnssec"`
@@ -148,20 +150,31 @@ type NxLogConfig struct {
 	Format string
 }
 
+type ForwardingConfig struct {
+	ForwardingRules []MaskedQueryPlugin `toml:"forwarding_rules"`
+}
+
+type CloakingConfig struct {
+	CloakingRules []MaskedQueryPlugin `toml:"cloaking_rules"`
+}
+
 type BlockNameConfig struct {
 	File    string `toml:"blacklist_file"`
+	BlockNameRules  []MaskedQueryPlugin `toml:"blacklist_rules"`
 	LogFile string `toml:"log_file"`
 	Format  string `toml:"log_format"`
 }
 
 type WhitelistNameConfig struct {
 	File    string `toml:"whitelist_file"`
+	WhitelistRules  []MaskedQueryPlugin `toml:"whitelist_rules"`
 	LogFile string `toml:"log_file"`
 	Format  string `toml:"log_format"`
 }
 
 type BlockIPConfig struct {
 	File    string `toml:"blacklist_file"`
+	BlockIPRules  []MaskedQueryPlugin `toml:"blacklist_rules"`
 	LogFile string `toml:"log_file"`
 	Format  string `toml:"log_format"`
 }
@@ -176,6 +189,11 @@ type ServerSummary struct {
 	NoLog       bool     `json:"nolog"`
 	NoFilter    bool     `json:"nofilter"`
 	Description string   `json:"description,omitempty"`
+}
+
+type MaskedQueryPlugin struct {
+	FileName    string `toml:"file_name"`
+	SubnetMask  string `toml:"subnet_mask"`
 }
 
 func findConfigFile(configFile *string) (string, error) {
@@ -385,7 +403,11 @@ func ConfigLoad(proxy *Proxy, svcFlag *string) error {
 	if config.BlockName.Format != "tsv" && config.BlockName.Format != "ltsv" {
 		return errors.New("Unsupported block log format")
 	}
-	proxy.blockNameFile = config.BlockName.File
+	if md.IsDefined("blacklist", "blacklist_file") {
+		dlog.Notice("config option `blacklist_file` is deprecated, use the `blacklist_rules` table")
+		config.BlockName.BlockNameRules = append(config.BlockName.BlockNameRules, MaskedQueryPlugin{FileName: config.BlockName.File})
+	}
+	proxy.blockNameRules = config.BlockName.BlockNameRules
 	proxy.blockNameFormat = config.BlockName.Format
 	proxy.blockNameLogFile = config.BlockName.LogFile
 
@@ -397,7 +419,11 @@ func ConfigLoad(proxy *Proxy, svcFlag *string) error {
 	if config.WhitelistName.Format != "tsv" && config.WhitelistName.Format != "ltsv" {
 		return errors.New("Unsupported whitelist log format")
 	}
-	proxy.whitelistNameFile = config.WhitelistName.File
+	if md.IsDefined("whitelist", "whitelist_file") {
+		dlog.Notice("config option `whitelist_file` is deprecated, use the `whitelist_rules` table")
+		config.WhitelistName.WhitelistRules = append(config.WhitelistName.WhitelistRules, MaskedQueryPlugin{FileName: config.WhitelistName.File})
+	}
+	proxy.whitelistRules = config.WhitelistName.WhitelistRules
 	proxy.whitelistNameFormat = config.WhitelistName.Format
 	proxy.whitelistNameLogFile = config.WhitelistName.LogFile
 
@@ -409,12 +435,25 @@ func ConfigLoad(proxy *Proxy, svcFlag *string) error {
 	if config.BlockIP.Format != "tsv" && config.BlockIP.Format != "ltsv" {
 		return errors.New("Unsupported IP block log format")
 	}
-	proxy.blockIPFile = config.BlockIP.File
+	if md.IsDefined("ip_blacklist", "blacklist_file") {
+		dlog.Notice("config option `blacklist_file` is deprecated, use the `blacklist_rules` table")
+		config.BlockIP.BlockIPRules = append(config.BlockIP.BlockIPRules, MaskedQueryPlugin{FileName: config.BlockIP.File})
+	}
+	proxy.blockIPRules = config.BlockIP.BlockIPRules
 	proxy.blockIPFormat = config.BlockIP.Format
 	proxy.blockIPLogFile = config.BlockIP.LogFile
 
-	proxy.forwardFile = config.ForwardFile
-	proxy.cloakFile = config.CloakFile
+	if md.IsDefined("forwarding_rules") {
+		dlog.Notice("config option `forwarding_rules` is deprecated, use the `forward` table")
+		config.Forwarding.ForwardingRules = append(config.Forwarding.ForwardingRules, MaskedQueryPlugin{FileName: config.ForwardFile})
+	}
+	proxy.forwardRules = config.Forwarding.ForwardingRules
+
+	if md.IsDefined("cloaking_rules") {
+		dlog.Notice("config option `cloaking_rules` is deprecated, use the `cloaking` table")
+		config.Cloaking.CloakingRules = append(config.Cloaking.CloakingRules, MaskedQueryPlugin{FileName: config.CloakFile})
+	}
+	proxy.cloakingRules = config.Cloaking.CloakingRules
 
 	allWeeklyRanges, err := ParseAllWeeklyRanges(config.AllWeeklyRanges)
 	if err != nil {

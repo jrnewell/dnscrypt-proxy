@@ -20,6 +20,10 @@ type PluginBlockName struct {
 	format          string
 }
 
+func NewPluginBlockName() FileNamePlugin {
+	return FileNamePlugin(new(PluginBlockName))
+}
+
 func (plugin *PluginBlockName) Name() string {
 	return "block_name"
 }
@@ -29,8 +33,12 @@ func (plugin *PluginBlockName) Description() string {
 }
 
 func (plugin *PluginBlockName) Init(proxy *Proxy) error {
-	dlog.Noticef("Loading the set of blocking rules from [%s]", proxy.blockNameFile)
-	bin, err := ReadTextFile(proxy.blockNameFile)
+	return nil
+}
+
+func (plugin *PluginBlockName) InitWithFileName(proxy *Proxy, fileName string, logger *lumberjack.Logger) error {
+	dlog.Noticef("Loading the set of blocking rules from [%s]", fileName)
+	bin, err := ReadTextFile(fileName)
 	if err != nil {
 		return err
 	}
@@ -67,10 +75,18 @@ func (plugin *PluginBlockName) Init(proxy *Proxy) error {
 	if len(proxy.blockNameLogFile) == 0 {
 		return nil
 	}
-	plugin.logger = &lumberjack.Logger{LocalTime: true, MaxSize: proxy.logMaxSize, MaxAge: proxy.logMaxAge, MaxBackups: proxy.logMaxBackups, Filename: proxy.blockNameLogFile, Compress: true}
+	if logger != nil {
+		plugin.logger = logger
+	} else {
+		plugin.logger = &lumberjack.Logger{LocalTime: true, MaxSize: proxy.logMaxSize, MaxAge: proxy.logMaxAge, MaxBackups: proxy.logMaxBackups, Filename: proxy.blockNameLogFile, Compress: true}
+	}
 	plugin.format = proxy.blockNameFormat
 
 	return nil
+}
+
+func (plugin *PluginBlockName) GetLogger() *lumberjack.Logger {
+	return plugin.logger
 }
 
 func (plugin *PluginBlockName) Drop() error {

@@ -21,6 +21,10 @@ type PluginBlockIP struct {
 	format          string
 }
 
+func NewPluginBlockIP() FileNamePlugin {
+	return FileNamePlugin(new(PluginBlockIP))
+}
+
 func (plugin *PluginBlockIP) Name() string {
 	return "block_ip"
 }
@@ -30,8 +34,12 @@ func (plugin *PluginBlockIP) Description() string {
 }
 
 func (plugin *PluginBlockIP) Init(proxy *Proxy) error {
-	dlog.Noticef("Loading the set of IP blocking rules from [%s]", proxy.blockIPFile)
-	bin, err := ReadTextFile(proxy.blockIPFile)
+	return nil
+}
+
+func (plugin *PluginBlockIP) InitWithFileName(proxy *Proxy, fileName string, logger *lumberjack.Logger) error {
+	dlog.Noticef("Loading the set of IP blocking rules from [%s]", fileName)
+	bin, err := ReadTextFile(fileName)
 	if err != nil {
 		return err
 	}
@@ -72,10 +80,18 @@ func (plugin *PluginBlockIP) Init(proxy *Proxy) error {
 	if len(proxy.blockIPLogFile) == 0 {
 		return nil
 	}
-	plugin.logger = &lumberjack.Logger{LocalTime: true, MaxSize: proxy.logMaxSize, MaxAge: proxy.logMaxAge, MaxBackups: proxy.logMaxBackups, Filename: proxy.blockIPLogFile, Compress: true}
+	if logger != nil {
+		plugin.logger = logger
+	} else {
+		plugin.logger = &lumberjack.Logger{LocalTime: true, MaxSize: proxy.logMaxSize, MaxAge: proxy.logMaxAge, MaxBackups: proxy.logMaxBackups, Filename: proxy.blockIPLogFile, Compress: true}
+	}
 	plugin.format = proxy.blockIPFormat
 
 	return nil
+}
+
+func (plugin *PluginBlockIP) GetLogger() *lumberjack.Logger {
+	return plugin.logger
 }
 
 func (plugin *PluginBlockIP) Drop() error {

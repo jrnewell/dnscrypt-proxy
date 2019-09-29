@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"gopkg.in/natefinch/lumberjack.v2"
 	"net"
 	"strings"
 	"sync"
@@ -24,11 +25,17 @@ const (
 type PluginsGlobals struct {
 	sync.RWMutex
 	queryPlugins           *[]Plugin
+	maskedQueryPlugins     *[]MaskedPlugin
 	responsePlugins        *[]Plugin
 	loggingPlugins         *[]Plugin
 	refusedCodeInResponses bool
 	respondWithIPv4        net.IP
 	respondWithIPv6        net.IP
+}
+
+type MaskedPlugin struct {
+	plugin     *Plugin
+	masks      []*net.IPNet
 }
 
 type PluginsReturnCode int
@@ -83,39 +90,25 @@ type PluginsState struct {
 
 func InitPluginsGlobals(pluginsGlobals *PluginsGlobals, proxy *Proxy) error {
 	queryPlugins := &[]Plugin{}
+	maskedQueryPlugins := &[]MaskedPlugin{}
 
 	if len(proxy.queryMeta) != 0 {
 		*queryPlugins = append(*queryPlugins, Plugin(new(PluginQueryMeta)))
 	}
-	if len(proxy.whitelistNameFile) != 0 {
-		*queryPlugins = append(*queryPlugins, Plugin(new(PluginWhitelistName)))
-	}
 
 	*queryPlugins = append(*queryPlugins, Plugin(new(PluginFirefox)))
 
-	if len(proxy.blockNameFile) != 0 {
-		*queryPlugins = append(*queryPlugins, Plugin(new(PluginBlockName)))
-	}
 	if proxy.pluginBlockIPv6 {
 		*queryPlugins = append(*queryPlugins, Plugin(new(PluginBlockIPv6)))
-	}
-	if len(proxy.cloakFile) != 0 {
-		*queryPlugins = append(*queryPlugins, Plugin(new(PluginCloak)))
 	}
 	*queryPlugins = append(*queryPlugins, Plugin(new(PluginGetSetPayloadSize)))
 	if proxy.cache {
 		*queryPlugins = append(*queryPlugins, Plugin(new(PluginCache)))
 	}
-	if len(proxy.forwardFile) != 0 {
-		*queryPlugins = append(*queryPlugins, Plugin(new(PluginForward)))
-	}
 
 	responsePlugins := &[]Plugin{}
 	if len(proxy.nxLogFile) != 0 {
 		*responsePlugins = append(*responsePlugins, Plugin(new(PluginNxLog)))
-	}
-	if len(proxy.blockIPFile) != 0 {
-		*responsePlugins = append(*responsePlugins, Plugin(new(PluginBlockIP)))
 	}
 	if proxy.cache {
 		*responsePlugins = append(*responsePlugins, Plugin(new(PluginCacheResponse)))
@@ -143,11 +136,59 @@ func InitPluginsGlobals(pluginsGlobals *PluginsGlobals, proxy *Proxy) error {
 	}
 
 	(*pluginsGlobals).queryPlugins = queryPlugins
+	(*pluginsGlobals).maskedQueryPlugins = maskedQueryPlugins
 	(*pluginsGlobals).responsePlugins = responsePlugins
 	(*pluginsGlobals).loggingPlugins = loggingPlugins
 
+	if err := initMaskedQueryPlugin(proxy.whitelistRules, NewPluginWhitelistName, proxy, pluginsGlobals); err != nil {
+		return err
+	}
+	if err := initMaskedQueryPlugin(proxy.blockNameRules, NewPluginBlockName, proxy, pluginsGlobals); err != nil {
+		return err
+	}
+	if err := initMaskedQueryPlugin(proxy.cloakingRules, NewPluginCloak, proxy, pluginsGlobals); err != nil {
+		return err
+	}
+	if err := initMaskedQueryPlugin(proxy.forwardRules, NewPluginForward, proxy, pluginsGlobals); err != nil {
+		return err
+	}
+	if err := initMaskedQueryPlugin(proxy.blockIPRules, NewPluginBlockIP, proxy, pluginsGlobals); err != nil {
+		return err
+	}
+
 	parseBlockedQueryResponse(proxy.blockedQueryResponse, pluginsGlobals)
 
+	return nil
+}
+
+func initMaskedQueryPlugin(rules []MaskedQueryPlugin, newPlugin func() FileNamePlugin, proxy *Proxy, pluginsGlobals *PluginsGlobals) error {
+	if len(rules) > 0 {
+		var logger *lumberjack.Logger
+		for _, rule := range rules {
+			fileNamePlugin := newPlugin()
+			if err := fileNamePlugin.InitWithFileName(proxy, rule.FileName, logger); err != nil {
+				return err
+			}
+			logger = fileNamePlugin.GetLogger()
+
+			plugin := fileNamePlugin.(Plugin)
+			if len(rule.SubnetMask) > 0 {
+				maskedPlugin := MaskedPlugin{plugin: &plugin}
+				for _, mask := range strings.Split(rule.SubnetMask, ",") {
+					if _, ipNet, err := net.ParseCIDR(mask); err == nil {
+						maskedPlugin.masks = append(maskedPlugin.masks, ipNet)
+					} else {
+						dlog.Errorf("Invalid IP subnet mask: %s", mask)
+						continue
+					}
+				}
+
+				*(*pluginsGlobals).maskedQueryPlugins = append(*(*pluginsGlobals).maskedQueryPlugins, maskedPlugin)
+			} else {
+				*(*pluginsGlobals).queryPlugins = append(*(*pluginsGlobals).queryPlugins, plugin)
+			}
+		}
+	}
 	return nil
 }
 
@@ -207,6 +248,11 @@ type Plugin interface {
 	Eval(pluginsState *PluginsState, msg *dns.Msg) error
 }
 
+type FileNamePlugin interface {
+	InitWithFileName(proxy *Proxy, fileName string, logger *lumberjack.Logger) error
+	GetLogger() *lumberjack.Logger
+}
+
 func NewPluginsState(proxy *Proxy, clientProto string, clientAddr *net.Addr, start time.Time) PluginsState {
 	return PluginsState{
 		action:         PluginsActionForward,
@@ -224,7 +270,7 @@ func NewPluginsState(proxy *Proxy, clientProto string, clientAddr *net.Addr, sta
 }
 
 func (pluginsState *PluginsState) ApplyQueryPlugins(pluginsGlobals *PluginsGlobals, packet []byte, serverName string) ([]byte, error) {
-	if len(*pluginsGlobals.queryPlugins) == 0 && len(*pluginsGlobals.loggingPlugins) == 0 {
+	if len(*pluginsGlobals.queryPlugins) == 0 && len(*pluginsGlobals.maskedQueryPlugins) == 0 && len(*pluginsGlobals.loggingPlugins) == 0 {
 		return packet, nil
 	}
 	pluginsState.serverName = serverName
@@ -238,7 +284,28 @@ func (pluginsState *PluginsState) ApplyQueryPlugins(pluginsGlobals *PluginsGloba
 	}
 	pluginsState.questionMsg = &msg
 	pluginsGlobals.RLock()
-	for _, plugin := range *pluginsGlobals.queryPlugins {
+
+	queryPlugins := &[]Plugin{}
+	for _, maskedPlugin := range *pluginsGlobals.maskedQueryPlugins {
+		var clientIPStr string
+		if pluginsState.clientProto == "udp" {
+			clientIPStr = (*pluginsState.clientAddr).(*net.UDPAddr).IP.String()
+		} else {
+			clientIPStr = (*pluginsState.clientAddr).(*net.TCPAddr).IP.String()
+		}
+
+		if ip := net.ParseIP(clientIPStr); ip != nil {
+			for _, mask := range maskedPlugin.masks {
+				if mask.Contains(ip) {
+					*queryPlugins = append(*queryPlugins, *maskedPlugin.plugin)
+				}
+			}
+		} else {
+			dlog.Errorf("Could not parse client address: %s", clientIPStr)
+		}
+	}
+	*queryPlugins = append(*queryPlugins, *(*pluginsGlobals).queryPlugins...)
+	for _, plugin := range *queryPlugins {
 		if ret := plugin.Eval(pluginsState, &msg); ret != nil {
 			pluginsGlobals.RUnlock()
 			pluginsState.action = PluginsActionDrop
@@ -255,6 +322,7 @@ func (pluginsState *PluginsState) ApplyQueryPlugins(pluginsGlobals *PluginsGloba
 			break
 		}
 	}
+
 	pluginsGlobals.RUnlock()
 	packet2, err := msg.PackBuffer(packet)
 	if err != nil {

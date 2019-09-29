@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"gopkg.in/natefinch/lumberjack.v2"
 	"math/rand"
 	"net"
 	"strings"
@@ -20,6 +21,10 @@ type PluginForward struct {
 	forwardMap []PluginForwardEntry
 }
 
+func NewPluginForward() FileNamePlugin {
+	return FileNamePlugin(new(PluginForward))
+}
+
 func (plugin *PluginForward) Name() string {
 	return "forward"
 }
@@ -29,8 +34,12 @@ func (plugin *PluginForward) Description() string {
 }
 
 func (plugin *PluginForward) Init(proxy *Proxy) error {
-	dlog.Noticef("Loading the set of forwarding rules from [%s]", proxy.forwardFile)
-	bin, err := ReadTextFile(proxy.forwardFile)
+	return nil
+}
+
+func (plugin *PluginForward) InitWithFileName(proxy *Proxy, fileName string, logger *lumberjack.Logger) error {
+	dlog.Noticef("Loading the set of forwarding rules from [%s]", fileName)
+	bin, err := ReadTextFile(fileName)
 	if err != nil {
 		return err
 	}
@@ -59,6 +68,10 @@ func (plugin *PluginForward) Init(proxy *Proxy) error {
 			domain: domain, servers: servers,
 		})
 	}
+	return nil
+}
+
+func (plugin *PluginForward) GetLogger() *lumberjack.Logger {
 	return nil
 }
 
